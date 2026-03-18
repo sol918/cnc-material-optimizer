@@ -84,11 +84,27 @@ def inject_nav_css(mat_order, active_mat):
             background-color: transparent !important;
         }}"""
 
-    err_idx = len(mat_order) + 3
+    # Batch button
+    batch_idx = len(mat_order) + 3
+    batch_active = active_mat == "__batch__"
+    if batch_active:
+        mat_css += f"""
+        #mat-nav > div:nth-child({batch_idx}) button {{
+            background-color: #FF7043 !important; color: white !important;
+            border-color: #FF7043 !important;
+        }}"""
+    else:
+        mat_css += f"""
+        #mat-nav > div:nth-child({batch_idx}) button {{
+            border: 2px solid #FF704388 !important; color: #FF7043 !important;
+            background-color: transparent !important;
+        }}"""
+
+    err_idx = len(mat_order) + 4
     err_active = active_mat == "__errors__"
 
     # Search button
-    search_idx = len(mat_order) + 4
+    search_idx = len(mat_order) + 5
     search_active = active_mat == "__search__"
     if search_active:
         mat_css += f"""
@@ -346,7 +362,7 @@ def main():
     nav = st.container()
     with nav:
         st.markdown('<div id="mat-nav">', unsafe_allow_html=True)
-        nav_cols = st.columns([1.1] + [1] * len(mat_order) + [1.3, 1, 1])
+        nav_cols = st.columns([1.1] + [1] * len(mat_order) + [1.2, 1.2, 1, 1])
         with nav_cols[0]:
             if st.button("Overview", use_container_width=True, key="nav_ov"):
                 st.session_state["page"] = None
@@ -357,13 +373,19 @@ def main():
                     st.session_state["page"] = mat
                     st.rerun()
 
-        # Logistics button
-        with nav_cols[-2]:
+        # Logistics
+        with nav_cols[-4]:
             if st.button("Logistics", use_container_width=True, key="nav_log"):
                 st.session_state["page"] = "__logistics__"
                 st.rerun()
 
-        # Errors button
+        # Batch Analysis
+        with nav_cols[-3]:
+            if st.button("Batch", use_container_width=True, key="nav_batch"):
+                st.session_state["page"] = "__batch__"
+                st.rerun()
+
+        # Errors
         err_count = len(oob)
         all_low_vol = []
         for mat in mat_order:
@@ -372,7 +394,6 @@ def main():
             for t, d in stats.items():
                 cost = d.get("material_cost", d["volume"] * cfg["price_m3"])
                 if cost < 1000 and cfg.get("nestable", False):
-                    # Collect PP-codes for these elements
                     t_elems = [e for e in mat_groups[mat] if e["thickness"] == t]
                     pp_codes = list(set(e["product_code"] for e in t_elems))[:20]
                     all_low_vol.append({"material": mat, "thickness": t,
@@ -397,6 +418,8 @@ def main():
         _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements)
     elif active_mat == "__logistics__":
         _page_logistics(all_elements, raw_df)
+    elif active_mat == "__batch__":
+        _page_batch(all_elements)
     elif active_mat == "__search__":
         _page_search(all_elements)
     elif active_mat == "__errors__":
@@ -1179,6 +1202,238 @@ def _build_export_df(raw_df, all_elements, assignments):
             elem_idx += 1
 
     return export
+
+
+# ── Batch Size Analysis ──────────────────────────────────────────────────
+
+def _page_batch(all_elements):
+    st.markdown(
+        "<div style='border-left:5px solid #FF7043; padding:6px 14px; "
+        "background:#FF704312; border-radius:5px; margin-bottom:8px'>"
+        "<span style='font-size:1.4rem; font-weight:700; color:#FF7043'>"
+        "Batch Size Analysis</span>"
+        "<span style='opacity:0.6; margin-left:10px; font-size:0.85rem'>"
+        "How does yield change with batch size?</span></div>",
+        unsafe_allow_html=True)
+
+    st.caption("This analysis nests elements for different batch sizes (modules and trucks) "
+               "to show how yield improves with larger batches. This is compute-intensive.")
+
+    # Group elements by module (sorted numerically)
+    mod_elems = defaultdict(list)
+    for e in all_elements:
+        mod_elems[e.get("module", "0")].append(e)
+
+    def _msort(m):
+        try: return int(m)
+        except: return 99999
+
+    sorted_modules = sorted(mod_elems.keys(), key=_msort)
+    total_modules = len(sorted_modules)
+
+    # Build truck groupings using sequential packing
+    from logistics import compute_module_weights, pack_trucks
+    trucks = pack_trucks(all_elements)
+    total_trucks = len(trucks)
+
+    # Define batch points
+    module_points = [n for n in [1, 2, 3, 4, 5, 6, 8, 10, 15, 20] if n <= total_modules]
+    if total_modules not in module_points:
+        module_points.append(total_modules)
+
+    truck_points = [n for n in [1, 2, 3, 5, 10, 15, 20] if n <= total_trucks]
+    if total_trucks not in truck_points:
+        truck_points.append(total_trucks)
+
+    st.markdown(f"**{total_modules} modules** across **{total_trucks} trucks** — "
+                f"{len(all_elements):,} elements total")
+
+    # Check for cached results
+    if "batch_results" not in st.session_state:
+        st.session_state["batch_results"] = None
+
+    if st.button("Run Batch Analysis", type="primary", use_container_width=True, key="run_batch"):
+        st.session_state["batch_results"] = None  # reset
+
+        results = []
+        progress = st.progress(0, text="Starting batch analysis...")
+        total_steps = len(module_points) + len(truck_points)
+        step = 0
+
+        # Module batches
+        for n_mods in module_points:
+            step += 1
+            progress.progress(step / total_steps,
+                              text=f"Nesting {n_mods} module{'s' if n_mods>1 else ''} "
+                                   f"({step}/{total_steps})...")
+            batch_mods = sorted_modules[:n_mods]
+            batch_elems = []
+            for m in batch_mods:
+                batch_elems.extend(mod_elems[m])
+
+            valid_b, _ = filter_out_of_bounds(batch_elems)
+            stats = _compute_batch_yield(valid_b)
+            results.append({
+                "batch": f"{n_mods} module{'s' if n_mods>1 else ''}",
+                "batch_type": "modules",
+                "n": n_mods,
+                "elements": len(valid_b),
+                **stats,
+            })
+
+        # Truck batches
+        for n_trucks in truck_points:
+            step += 1
+            progress.progress(step / total_steps,
+                              text=f"Nesting {n_trucks} truck{'s' if n_trucks>1 else ''} "
+                                   f"({step}/{total_steps})...")
+            batch_mods = set()
+            for t in trucks[:n_trucks]:
+                batch_mods.update(t["modules"])
+            batch_elems = []
+            for m in batch_mods:
+                batch_elems.extend(mod_elems.get(m, []))
+
+            valid_b, _ = filter_out_of_bounds(batch_elems)
+            stats = _compute_batch_yield(valid_b)
+            results.append({
+                "batch": f"{n_trucks} truck{'s' if n_trucks>1 else ''}",
+                "batch_type": "trucks",
+                "n": n_trucks,
+                "elements": len(valid_b),
+                **stats,
+            })
+
+        progress.empty()
+        st.session_state["batch_results"] = results
+
+    results = st.session_state.get("batch_results")
+    if results is None:
+        st.info("Click the button above to start the analysis.")
+        return
+
+    # ── Results table ──
+    st.markdown("### Results")
+    table_rows = [{
+        "Batch": r["batch"],
+        "Elements": f"{r['elements']:,}",
+        "Volume (m³)": f"{r['element_vol']:.1f}",
+        "Plate Vol (m³)": f"{r['plate_vol']:.1f}",
+        "Yield %": f"{r['yield_pct']:.1f}%",
+        "Gross Yield %": f"{r['gross_yield_pct']:.1f}%",
+        "Waste (€)": f"EUR{r['waste_cost']:,.0f}",
+        "Plates": r["num_plates"],
+    } for r in results]
+    st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+
+    # ── Chart ──
+    mod_results = [r for r in results if r["batch_type"] == "modules"]
+    truck_results = [r for r in results if r["batch_type"] == "trucks"]
+
+    fig = go.Figure()
+
+    if mod_results:
+        fig.add_trace(go.Scatter(
+            x=[r["elements"] for r in mod_results],
+            y=[r["yield_pct"] for r in mod_results],
+            mode="lines+markers+text",
+            name="By Modules",
+            marker=dict(color="#FF7043", size=10),
+            text=[r["batch"] for r in mod_results],
+            textposition="top center",
+            textfont=dict(size=9),
+            hovertemplate="%{text}<br>%{x:,} elements<br>Yield: %{y:.1f}%<extra></extra>",
+        ))
+
+    if truck_results:
+        fig.add_trace(go.Scatter(
+            x=[r["elements"] for r in truck_results],
+            y=[r["yield_pct"] for r in truck_results],
+            mode="lines+markers+text",
+            name="By Trucks",
+            marker=dict(color="#7E57C2", size=10),
+            text=[r["batch"] for r in truck_results],
+            textposition="bottom center",
+            textfont=dict(size=9),
+            hovertemplate="%{text}<br>%{x:,} elements<br>Yield: %{y:.1f}%<extra></extra>",
+        ))
+
+    fig.update_layout(
+        title="Yield % vs Batch Size",
+        xaxis_title="Number of Elements in Batch",
+        yaxis_title="Nett Yield %",
+        template="plotly_dark", height=450,
+        margin=dict(t=50, b=40, l=50, r=20),
+        legend=dict(yanchor="bottom", y=0.05, xanchor="right", x=0.95),
+        yaxis=dict(range=[
+            min(r["yield_pct"] for r in results) - 3,
+            max(r["yield_pct"] for r in results) + 3,
+        ]),
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+    # ── Insight ──
+    if len(results) >= 2:
+        worst = min(results, key=lambda r: r["yield_pct"])
+        best = max(results, key=lambda r: r["yield_pct"])
+        st.markdown(f"**Lowest yield:** {worst['batch']} at {worst['yield_pct']:.1f}% — "
+                    f"**Highest yield:** {best['batch']} at {best['yield_pct']:.1f}% — "
+                    f"**Improvement:** {best['yield_pct'] - worst['yield_pct']:.1f} percentage points")
+
+
+def _compute_batch_yield(elements):
+    """Compute total yield for a batch of elements across all materials/thicknesses."""
+    from nesting import get_config, auto_optimize, nest_fixed, filter_out_of_bounds
+
+    by_mat = defaultdict(lambda: defaultdict(list))
+    for e in elements:
+        by_mat[e["material"]][e["thickness"]].append(e)
+
+    total_pv = 0
+    total_bv = 0
+    total_av = 0
+    total_plates = 0
+    total_cost = 0
+
+    for mat, by_t in by_mat.items():
+        cfg = get_config(mat)
+        for t, elems in by_t.items():
+            if cfg["nestable"] and cfg["variable_length"]:
+                ar = auto_optimize(elems, mat, t)
+                plates = ar[-1]["plates"] if ar else []
+            elif cfg["nestable"]:
+                plates = nest_fixed(elems, mat).get(t, [])
+            else:
+                plates = []
+
+            pv = sum(p["plate_vol_m3"] for p in plates) if plates else 0
+            bv = sum(p["box_vol_m3"] for p in plates) if plates else 0
+            av = sum(p["actual_vol_m3"] for p in plates) if plates else sum(e["volume"] for e in elems)
+
+            if not cfg["nestable"]:
+                pv = sum(e["volume"] for e in elems)
+                bv = pv
+                av = pv
+
+            total_pv += pv
+            total_bv += bv
+            total_av += av
+            total_plates += len(plates) if plates else len(elems)
+            total_cost += (pv - av) * cfg["price_m3"] if pv > 0 else 0
+
+    yield_pct = (total_av / total_pv * 100) if total_pv > 0 else 0
+    gross_yield_pct = (total_bv / total_pv * 100) if total_pv > 0 else 0
+
+    return {
+        "element_vol": sum(e["volume"] for e in elements),
+        "plate_vol": total_pv,
+        "box_vol": total_bv,
+        "actual_vol": total_av,
+        "yield_pct": yield_pct,
+        "gross_yield_pct": gross_yield_pct,
+        "waste_cost": total_cost,
+        "num_plates": total_plates,
+    }
 
 
 # ── Element Search ────────────────────────────────────────────────────────
