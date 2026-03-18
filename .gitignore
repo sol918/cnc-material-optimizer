@@ -1,0 +1,7 @@
+*.csv
+*.pdf
+__pycache__/
+*.pyc
+.streamlit/
+nieuw*.txt
+test_report*
