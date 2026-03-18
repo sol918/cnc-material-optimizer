@@ -1,6 +1,3 @@
 [server]
 maxUploadSize = 500
-runOnSave = false
-
-[runner]
-fastReruns = true
+maxMessageSize = 500
