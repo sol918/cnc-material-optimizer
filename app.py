@@ -1382,8 +1382,8 @@ def _page_batch(all_elements):
 
 
 def _compute_batch_yield(elements):
-    """Compute total yield for a batch of elements across all materials/thicknesses."""
-    from nesting import get_config, auto_optimize, nest_fixed, filter_out_of_bounds
+    """Compute total yield for a batch — uses fast single-pass nesting."""
+    from nesting import get_config, optimize_variable_fast, nest_fixed_fast
 
     by_mat = defaultdict(lambda: defaultdict(list))
     for e in elements:
@@ -1399,10 +1399,9 @@ def _compute_batch_yield(elements):
         cfg = get_config(mat)
         for t, elems in by_t.items():
             if cfg["nestable"] and cfg["variable_length"]:
-                ar = auto_optimize(elems, mat, t)
-                plates = ar[-1]["plates"] if ar else []
+                plates = optimize_variable_fast(elems, mat, t)
             elif cfg["nestable"]:
-                plates = nest_fixed(elems, mat).get(t, [])
+                plates = nest_fixed_fast(elems, mat).get(t, [])
             else:
                 plates = []
 

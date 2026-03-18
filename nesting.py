@@ -306,6 +306,53 @@ def nest_into_plates(elements, plate_w, plate_h, thickness, mat, kerf, margin):
     return plates
 
 
+def nest_into_plates_fast(elements, plate_w, plate_h, thickness, mat, kerf, margin):
+    """Single-pass MaxRects nesting — fast, for batch yield comparison only."""
+    allow_rot = mat not in _NO_ROTATE_MATS
+    remaining = list(elements)
+    plates = []
+    for _ in range(len(remaining) + 10):
+        if not remaining:
+            break
+        placed, remaining = maxrects_pack(remaining, plate_w, plate_h, kerf, margin,
+                                          allow_rotation=allow_rot)
+        if not placed:
+            break
+        plates.append({
+            "plate_length": plate_w, "plate_width": plate_h,
+            "thickness": thickness, "material": mat,
+            "placements": placed,
+            "plate_vol_m3": plate_w * plate_h * thickness / 1e9,
+            "box_vol_m3": sum(p["pw"] * p["ph"] * thickness / 1e9 for p in placed),
+            "actual_vol_m3": sum(p["volume"] for p in placed),
+        })
+    return plates
+
+
+def optimize_variable_fast(elements, mat, thickness):
+    """Single plate size, single-pass nesting — for batch comparison."""
+    cfg = get_config(mat)
+    pw = cfg["fixed_width"]
+    kerf, margin = cfg["kerf"], cfg["margin"]
+    if not elements:
+        return []
+    max_len = max(e["length"] for e in elements) + 2 * margin
+    return nest_into_plates_fast(elements, max_len, pw, thickness, mat, kerf, margin)
+
+
+def nest_fixed_fast(elements, mat):
+    """Single-pass fixed plate nesting — for batch comparison."""
+    cfg = get_config(mat)
+    by_t = defaultdict(list)
+    for e in elements:
+        by_t[e["thickness"]].append(e)
+    result = {}
+    for t, elems in by_t.items():
+        result[t] = nest_into_plates_fast(elems, cfg["plate_l"], cfg["plate_w"],
+                                          t, mat, cfg["kerf"], cfg["margin"])
+    return result
+
+
 def plate_layout_key(plate):
     parts = tuple(sorted(
         ((round(p["px"]), round(p["py"]), round(p["pw"]), round(p["ph"])) for p in plate["placements"]),

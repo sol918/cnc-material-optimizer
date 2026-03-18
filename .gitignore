@@ -2,6 +2,6 @@
 *.pdf
 __pycache__/
 *.pyc
-.streamlit/
+.streamlit/secrets*
 nieuw*.txt
 test_report*
