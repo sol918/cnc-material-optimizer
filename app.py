@@ -250,14 +250,16 @@ def get_all_thickness_stats_batched(mat, elements, batch_mode, trucks):
     if batch_mode == "Per Module":
         for e in elements:
             batches[e.get("module", "0")].append(e)
-    else:  # Per Truck
+    else:  # Per Truck or Per 2 Trucks
         mod_to_truck = {}
         for t in trucks:
             for m in t["modules"]:
                 mod_to_truck[m] = t["truck_id"]
+        group_size = 2 if batch_mode == "Per 2 Trucks" else 1
         for e in elements:
             truck_id = mod_to_truck.get(e.get("module", "0"), 0)
-            batches[truck_id].append(e)
+            batch_id = (truck_id - 1) // group_size if group_size > 1 else truck_id
+            batches[batch_id].append(e)
 
     # Nest each batch independently, aggregate results
     agg = {}
@@ -402,11 +404,12 @@ def main():
 
     batch_mode = st.radio(
         "Nesting batch size",
-        ["Per Module", "Per Truck", "All Together"],
-        index=2,
+        ["Per Module", "Per Truck", "Per 2 Trucks", "All Together"],
+        index=3,
         horizontal=True,
         help=(f"**Per Module** — nest each module independently ({n_mods} modules). "
               f"**Per Truck** — nest each truck-load together ({n_trucks} trucks). "
+              f"**Per 2 Trucks** — nest every 2 trucks together ({math.ceil(n_trucks/2)} batches). "
               f"**All Together** — nest all elements in one batch (best yield)."),
         key="batch_mode",
     )
