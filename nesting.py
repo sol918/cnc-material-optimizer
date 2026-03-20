@@ -16,9 +16,9 @@ MATERIAL_CONFIG = {
     "FERM":  {"plate_l": 2600, "plate_w": 1250, "kerf": 16, "margin": 1, "price_m3": 620.0,  "nestable": True,  "variable_length": False},
     "GIPF":  {"plate_l": 2600, "plate_w": 1200, "kerf": 3,  "margin": 0, "price_m3": 250.0,  "nestable": True,  "variable_length": False},
     "GIPA":  {"plate_l": 2600, "plate_w": 1200, "kerf": 3,  "margin": 0, "price_m3": 250.0,  "nestable": True,  "variable_length": False},
-    "CEM":   {"plate_l": 2500, "plate_w": 1200, "kerf": 3,  "margin": 0, "price_m3": 1990.0, "nestable": True,  "variable_length": False},
+    "CEM":   {"plate_l": 2500, "plate_w": 1200, "kerf": 3,  "margin": 0, "price_m3": 2362.0, "nestable": True,  "variable_length": False},
     "PRO":   {"kerf": 3, "margin": 0, "price_m3": 1250.0, "nestable": False, "variable_length": False},
-    "BAUB":  {"kerf": 3, "margin": 0, "price_m3": 1400.0, "nestable": False, "variable_length": False},
+    "BAUB":  {"kerf": 3, "margin": 0, "price_m3": 1480.0, "nestable": False, "variable_length": False},
 }
 
 def get_config(mat):
