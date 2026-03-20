@@ -240,6 +240,48 @@ def get_all_thickness_stats(mat, elements):
     return results
 
 
+def get_all_thickness_stats_batched(mat, elements, batch_mode, trucks):
+    """Get stats with batch-based nesting. Each batch nested independently."""
+    if batch_mode == "All Together":
+        return get_all_thickness_stats(mat, elements)
+
+    # Split elements (already filtered to this material) into batches
+    batches = defaultdict(list)
+    if batch_mode == "Per Module":
+        for e in elements:
+            batches[e.get("module", "0")].append(e)
+    else:  # Per Truck
+        mod_to_truck = {}
+        for t in trucks:
+            for m in t["modules"]:
+                mod_to_truck[m] = t["truck_id"]
+        for e in elements:
+            truck_id = mod_to_truck.get(e.get("module", "0"), 0)
+            batches[truck_id].append(e)
+
+    # Nest each batch independently, aggregate results
+    agg = {}
+    for batch_elems in batches.values():
+        stats = get_all_thickness_stats(mat, batch_elems)
+        for t, d in stats.items():
+            if t not in agg:
+                agg[t] = {"count": 0, "volume": 0, "plate_vol": 0, "box_vol": 0,
+                          "actual_vol": 0, "waste_cost": 0, "material_cost": 0,
+                          "num_plates": 0, "plates": []}
+            a = agg[t]
+            for k in ["count", "volume", "plate_vol", "box_vol", "actual_vol",
+                       "waste_cost", "material_cost", "num_plates"]:
+                a[k] += d[k]
+            a["plates"].extend(d["plates"])
+
+    for a in agg.values():
+        pv = a["plate_vol"]
+        a["gross_loss"] = ((pv - a["box_vol"]) / pv * 100) if pv > 0 else 0
+        a["nett_loss"] = ((pv - a["actual_vol"]) / pv * 100) if pv > 0 else 0
+
+    return agg
+
+
 # ── Charts ────────────────────────────────────────────────────────────────
 
 ELEM_COLORS = px.colors.qualitative.Set3 + px.colors.qualitative.Pastel1
@@ -352,6 +394,23 @@ def main():
     mat_order = [m for m in ["LVLQ","LVLS","LVLB","SPANO","FERM","GIPF","GIPA","CEM","PRO","BAUB"]
                  if m in mat_groups]
 
+    # ── Batch size selector ──
+    from logistics import pack_trucks
+    trucks = pack_trucks(all_elements)
+    n_mods = len(set(e.get("module", "0") for e in all_elements))
+    n_trucks = len(trucks)
+
+    batch_mode = st.radio(
+        "Nesting batch size",
+        ["Per Module", "Per Truck", "All Together"],
+        index=2,
+        horizontal=True,
+        help=(f"**Per Module** — nest each module independently ({n_mods} modules). "
+              f"**Per Truck** — nest each truck-load together ({n_trucks} trucks). "
+              f"**All Together** — nest all elements in one batch (best yield)."),
+        key="batch_mode",
+    )
+
     if "page" not in st.session_state:
         st.session_state["page"] = None
 
@@ -390,7 +449,7 @@ def main():
         all_low_vol = []
         for mat in mat_order:
             cfg = get_config(mat)
-            stats = get_all_thickness_stats(mat, mat_groups[mat])
+            stats = get_all_thickness_stats_batched(mat, mat_groups[mat], batch_mode, trucks)
             for t, d in stats.items():
                 cost = d.get("material_cost", d["volume"] * cfg["price_m3"])
                 if cost < 1000 and cfg.get("nestable", False):
@@ -415,7 +474,8 @@ def main():
     st.markdown("---")
 
     if active_mat is None:
-        _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements)
+        _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements,
+                       batch_mode, trucks)
     elif active_mat == "__logistics__":
         _page_logistics(all_elements, raw_df)
     elif active_mat == "__batch__":
@@ -425,7 +485,8 @@ def main():
     elif active_mat == "__errors__":
         _page_errors(oob, oob_by_mat, all_low_vol, all_elements)
     elif active_mat in mat_groups:
-        _page_material(active_mat, mat_groups[active_mat], oob_by_mat.get(active_mat, []))
+        _page_material(active_mat, mat_groups[active_mat], oob_by_mat.get(active_mat, []),
+                       batch_mode, trucks)
 
 
 # ── Errors Page ──────────────────────────────────────────────────────────
@@ -526,11 +587,12 @@ def _page_errors(oob, oob_by_mat, all_low_vol, all_elements):
 
 # ── Overview ──────────────────────────────────────────────────────────────
 
-def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=None):
+def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=None,
+                   batch_mode="All Together", trucks=None):
     rows = []
     total_cost = total_waste = total_vol = total_count = total_plates = 0
     for mat in mat_order:
-        stats = get_all_thickness_stats(mat, mat_groups[mat])
+        stats = get_all_thickness_stats_batched(mat, mat_groups[mat], batch_mode, trucks)
         count = sum(d["count"] for d in stats.values())
         vol = sum(d["volume"] for d in stats.values())
         pvol = sum(d["plate_vol"] for d in stats.values())
@@ -582,7 +644,7 @@ def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=N
 
     order_rows = []
     for mat in mat_order:
-        stats = get_all_thickness_stats(mat, mat_groups[mat])
+        stats = get_all_thickness_stats_batched(mat, mat_groups[mat], batch_mode, trucks)
         cfg = get_config(mat)
         for t in sorted(stats):
             d = stats[t]
@@ -633,7 +695,7 @@ def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=N
 
     # ── Building Step Breakdown ──
     st.markdown("---")
-    _render_building_step_breakdown(valid, mat_groups, mat_order)
+    _render_building_step_breakdown(valid, mat_groups, mat_order, batch_mode, trucks)
 
     with st.expander("Pricing reference"):
         st.dataframe(pd.DataFrame([
@@ -660,7 +722,7 @@ def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=N
                 pdf_bytes = generate_report(
                     all_elements=all_elements, valid=valid, oob=oob,
                     mat_groups=mat_groups, mat_order=mat_order,
-                    thickness_stats_fn=get_all_thickness_stats,
+                    thickness_stats_fn=lambda m, e: get_all_thickness_stats_batched(m, e, batch_mode, trucks),
                     mat_colors=MAT_COLORS, mat_labels=MAT_LABELS,
                     get_config_fn=get_config,
                     logistics_result=log_result,
@@ -670,7 +732,8 @@ def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=N
                                use_container_width=True)
 
 
-def _render_building_step_breakdown(elements, mat_groups, mat_order):
+def _render_building_step_breakdown(elements, mat_groups, mat_order,
+                                    batch_mode="All Together", trucks=None):
     """Building step pie chart + table with waste allocation."""
     st.markdown("#### Volume by Building Step")
 
@@ -688,7 +751,7 @@ def _render_building_step_breakdown(elements, mat_groups, mat_order):
     # Compute waste share per step (proportional to volume share per material)
     total_waste_by_mat = {}
     for mat in mat_order:
-        stats = get_all_thickness_stats(mat, mat_groups[mat])
+        stats = get_all_thickness_stats_batched(mat, mat_groups[mat], batch_mode, trucks)
         total_waste_by_mat[mat] = sum(d["waste_cost"] for d in stats.values())
 
     step_waste = defaultdict(float)
@@ -824,13 +887,13 @@ def _render_sankey(elements):
 
 # ── Material Detail ──────────────────────────────────────────────────────
 
-def _page_material(mat, elements, oob_elems):
+def _page_material(mat, elements, oob_elems, batch_mode="All Together", trucks=None):
     cfg = get_config(mat)
     color = MAT_COLORS.get(mat, "#888")
     label = MAT_LABELS.get(mat, mat)
 
     # Use pre-computed per-thickness stats (each independently cached)
-    stats = get_all_thickness_stats(mat, elements)
+    stats = get_all_thickness_stats_batched(mat, elements, batch_mode, trucks or [])
 
     info_parts = [f"€{cfg['price_m3']:,.0f}/m³"]
     if cfg.get("variable_length"):
