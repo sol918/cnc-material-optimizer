@@ -151,8 +151,10 @@ def inject_nav_css(mat_order, active_mat):
 
 # ── Parsing ────────────────────────────────────────────────────────────────
 
+_PARSE_VERSION = 2  # bump to invalidate cached parse results
+
 @st.cache_data(show_spinner="Parsing CSV...")
-def parse_csv(file_bytes_list=None, filepath=None):
+def parse_csv(file_bytes_list=None, filepath=None, _version=_PARSE_VERSION):
     """Parse one or more CSVs and concatenate into a single dataset."""
     dfs = []
     if filepath:
