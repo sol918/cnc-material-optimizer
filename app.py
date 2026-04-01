@@ -17,7 +17,7 @@ from nesting import (
 from logistics import process_logistics
 from report import generate_report
 
-st.set_page_config(page_title="CNC Material Optimizer", layout="wide", page_icon="🪵")
+st.set_page_config(page_title="CNC Material-Optimizer", layout="wide", page_icon="🪵")
 
 MAT_COLORS = {
     "LVLQ": "#5C6BC0", "LVLS": "#42A5F5", "LVLB": "#29B6F6",
@@ -370,7 +370,7 @@ def render_plates(plates, key_prefix, per_page=120):
 # ══════════════════════════════════════════════════════════════════════════
 
 def main():
-    st.title("CNC Material Optimizer")
+    st.title("CNC Material-Optimizer")
 
     uploaded = st.file_uploader("Drop your CSV file(s) here", type=["csv"],
                                 accept_multiple_files=True)
