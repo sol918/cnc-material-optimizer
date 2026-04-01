@@ -25,6 +25,36 @@ def get_config(mat):
     return MATERIAL_CONFIG.get(mat, MATERIAL_CONFIG["PRO"])
 
 
+def _parse_num(v):
+    """Parse a numeric value that may use commas as thousands/decimal separators.
+
+    Handles formats like '1,361,400' (meaning 1361.400) where a system exported
+    European-style decimals with additional thousands separators.
+    """
+    s = str(v).strip()
+    if s in ("", "nan"):
+        return 0.0
+    comma_count = s.count(",")
+    dot_count = s.count(".")
+    if comma_count >= 2 and dot_count == 0:
+        # e.g. '1,361,400' → last comma is decimal, others are thousands
+        last = s.rfind(",")
+        s = s[:last].replace(",", "") + "." + s[last+1:]
+    elif comma_count == 1 and dot_count == 0:
+        # Could be thousands sep (1,200) or decimal (3,5). If 3 digits after comma, treat as thousands.
+        parts = s.split(",")
+        if len(parts[1]) == 3 and len(parts[0]) >= 1:
+            s = s.replace(",", "")  # thousands separator
+        else:
+            s = s.replace(",", ".")  # decimal separator
+    elif comma_count == 0:
+        pass  # normal number with dots or no separators
+    else:
+        # dots and commas mixed — remove dots (thousands), replace comma with dot (decimal)
+        s = s.replace(".", "").replace(",", ".")
+    return float(s)
+
+
 def make_element(row):
     mat = str(row.get("materialId", "")).strip()
     if mat not in MATERIAL_CONFIG:
@@ -39,11 +69,11 @@ def make_element(row):
             "composite_name": _s(row.get("compositeName", "")),
             "element_name": _s(row.get("elementName", "")),
             "material": mat,
-            "length": int(float(str(row.get("length", 0)))),
-            "width": int(float(str(row.get("width", 0)))),
-            "thickness": int(float(str(row.get("thickness", 0)))),
-            "volume": float(str(row.get("volume", "0")).replace(",", ".")),
-            "weight": float(str(row.get("weight", "0")).replace(",", ".")),
+            "length": int(_parse_num(row.get("length", 0))),
+            "width": int(_parse_num(row.get("width", 0))),
+            "thickness": int(_parse_num(row.get("thickness", 0))),
+            "volume": _parse_num(row.get("volume", 0)),
+            "weight": _parse_num(row.get("weight", 0)),
             "building": _s(row.get("buildingNumber", "")),
             "module": _s(row.get("moduleNumber", "")),
             "work_station": _s(row.get("workStation", "")),
