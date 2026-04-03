@@ -17,6 +17,20 @@ from nesting import (
 from logistics import process_logistics
 from report import generate_report
 
+# ── Mill time data from logistics CSV ────────────────────────────────────
+
+LOGISTICS_CSV = os.path.join(os.path.dirname(__file__), "processed_logistics.csv")
+
+@st.cache_data(show_spinner=False)
+def _load_mill_times():
+    """Load processed_logistics.csv and return mill time totals per material (seconds)."""
+    if not os.path.exists(LOGISTICS_CSV):
+        return {}
+    df = pd.read_csv(LOGISTICS_CSV)
+    if "millTime" not in df.columns or "materialId" not in df.columns:
+        return {}
+    return df.groupby("materialId")["millTime"].sum().to_dict()
+
 st.set_page_config(page_title="CNC Material-Optimizer", layout="wide", page_icon="🪵")
 
 MAT_COLORS = {
@@ -592,10 +606,24 @@ def _page_errors(oob, oob_by_mat, all_low_vol, all_elements):
 
 # ── Overview ──────────────────────────────────────────────────────────────
 
+def _fmt_mill_time(seconds):
+    """Format seconds into 'Xh Ym' or 'Ym Zs' string."""
+    if seconds <= 0:
+        return "—"
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    if h > 0:
+        return f"{h}h {m:02d}m"
+    return f"{m}m {s:02d}s"
+
+
 def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=None,
                    batch_mode="All Together", trucks=None):
+    mill_times = _load_mill_times()
     rows = []
     total_cost = total_waste = total_vol = total_count = total_plates = 0
+    total_mill = 0
     for mat in mat_order:
         stats = get_all_thickness_stats_batched(mat, mat_groups[mat], batch_mode, trucks)
         count = sum(d["count"] for d in stats.values())
@@ -607,18 +635,21 @@ def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=N
         nplates = sum(d["num_plates"] for d in stats.values())
         gl = ((pvol - bvol) / pvol * 100) if pvol > 0 else 0
         nl = ((pvol - sum(d["actual_vol"] for d in stats.values())) / pvol * 100) if pvol > 0 else 0
+        mat_mill = mill_times.get(mat, 0)
         total_cost += cost; total_waste += waste; total_vol += vol
-        total_count += count; total_plates += nplates
+        total_count += count; total_plates += nplates; total_mill += mat_mill
         rows.append({"mat": mat, "count": count, "vol": vol, "cost": cost,
-                     "waste": waste, "plates": nplates, "gross_loss": gl, "nett_loss": nl})
+                     "waste": waste, "plates": nplates, "gross_loss": gl, "nett_loss": nl,
+                     "mill_time": mat_mill})
     rows.sort(key=lambda r: r["cost"], reverse=True)
 
-    c1, c2, c3, c4, c5 = st.columns(5)
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Total Elements", f"{total_count:,}")
     c2.metric("Total Volume", f"{total_vol:,.1f} m³")
     c3.metric("Gross Material Cost", f"€{total_cost:,.0f}")
     c4.metric("Total Waste Cost", f"€{total_waste:,.0f}")
     c5.metric("Total Plates", f"{total_plates:,}")
+    c6.metric("Total Mill Time", _fmt_mill_time(total_mill))
 
     col_pie, col_table = st.columns([1, 1.5])
     with col_pie:
@@ -640,6 +671,7 @@ def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=N
             "Plates": r["plates"], "Gross Cost (€)": f"€{r['cost']:,.0f}",
             "Waste (€)": f"€{r['waste']:,.0f}",
             "Gross Loss": f"{r['gross_loss']:.1f}%", "Nett Loss": f"{r['nett_loss']:.1f}%",
+            "Mill Time": _fmt_mill_time(r["mill_time"]),
         } for r in rows]), use_container_width=True, hide_index=True, height=420)
 
     # ── Plate Order Overview ──
