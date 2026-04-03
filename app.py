@@ -620,6 +620,9 @@ def _fmt_mill_time(seconds):
 def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=None,
                    batch_mode="All Together", trucks=None):
     mill_times = _load_mill_times()
+    st.sidebar.write("DEBUG mill_times path:", LOGISTICS_CSV)
+    st.sidebar.write("DEBUG file exists:", os.path.exists(LOGISTICS_CSV))
+    st.sidebar.write("DEBUG mill_times:", mill_times)
     rows = []
     total_cost = total_waste = total_vol = total_count = total_plates = 0
     total_mill = 0
