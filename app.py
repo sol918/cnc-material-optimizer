@@ -22,7 +22,7 @@ from report import generate_report
 LOGISTICS_CSV = os.path.join(os.path.dirname(__file__), "processed_logistics.csv")
 
 @st.cache_data(show_spinner=False)
-def _load_mill_times():
+def _load_mill_times(_mtime=None):
     """Load processed_logistics.csv and return mill time totals per material (seconds)."""
     if not os.path.exists(LOGISTICS_CSV):
         return {}
@@ -620,7 +620,8 @@ def _fmt_mill_time(seconds):
 
 def _page_overview(valid, oob, mat_groups, oob_by_mat, mat_order, all_elements=None,
                    batch_mode="All Together", trucks=None):
-    mill_times = _load_mill_times()
+    _mt = os.path.getmtime(LOGISTICS_CSV) if os.path.exists(LOGISTICS_CSV) else 0
+    mill_times = _load_mill_times(_mtime=_mt)
     rows = []
     total_cost = total_waste = total_vol = total_count = total_plates = 0
     total_mill = 0
